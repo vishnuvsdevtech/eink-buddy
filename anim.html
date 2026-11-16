@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>E-Paper Animation — fish, bubbles, butterflies on e-ink</title>
+<meta name="description" content="How e-paper actually animates: two 1-bit buffers, dirty-rectangle partial refresh, and the ghosting that forces a full refresh. Fish and butterflies on a 2.9in 296x128 panel.">
+<meta name="theme-color" content="#e9e7e0">
+<meta property="og:title" content="E-Paper Animation — fish, bubbles, butterflies on e-ink">
+<meta property="og:description" content="Dirty-rectangle partial refresh, ghost accumulation and the PARTIAL -> FULL escalation chain, simulated on a real 296x128 panel geometry.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://vishnuvsdevtech.github.io/eink-buddy/anim.html">
+<link rel="canonical" href="https://vishnuvsdevtech.github.io/eink-buddy/anim.html">
+<link rel="stylesheet" href="assets/eink.css">
+<style>
+  .scene-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .toggle{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);cursor:pointer}
+  .toggle input{accent-color:#14130f;width:14px;height:14px}
+  .legend{font-size:11px;line-height:1.75;color:var(--muted);border-left:2px solid var(--line-2);padding-left:12px}
+  .legend b{color:var(--ink)}
+  .legend i{font-style:normal;color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="dot" aria-hidden="true"></span>
+    <span>E-PAPER BUDDY<small>ANIMATION</small></span>
+  </div>
+  <a class="back mono" href="index.html">← the pet</a>
+</header>
+
+<main>
+  <section class="stage">
+
+    <div class="module">
+      <div class="pcb">
+        <canvas id="epd" width="296" height="128" aria-label="Simulated e-paper panel running an animation scene"></canvas>
+      </div>
+      <div class="labels mono">
+        <span>2.9" · 296×128</span>
+        <span id="scene">aquarium</span>
+        <span>1-bit · SPI</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <p class="hint">
+        E-paper <b>can</b> animate — badly. The trick isn't a faster panel, it's
+        <b>driving less of it</b>: diff two framebuffers, refresh only the box
+        that changed, and accept a ghost that eventually forces a full flash.
+      </p>
+
+      <div class="btns">
+        <button id="play" class="btn solid">Play</button>
+        <button id="stepBtn" class="btn">Step</button>
+        <button id="switch" class="btn">Switch scene</button>
+        <button id="fullBtn" class="btn">Full refresh</button>
+      </div>
+
+      <div class="scene-row">
+        <label class="toggle"><input type="checkbox" id="window" checked> show the refresh window</label>
+      </div>
+
+      <dl class="readout mono">
+        <div><dt>refresh</dt><dd id="mode">full</dd></div>
+        <div><dt>last</dt><dd id="ms">~2400 ms</dd></div>
+        <div><dt>dirty</dt><dd id="dirty">—</dd></div>
+        <div><dt>since full</dt><dd id="since">0</dd></div>
+        <div><dt>ghost</dt><dd id="ghost">0%</dd></div>
+        <div><dt>total</dt><dd id="count">1</dd></div>
+      </dl>
+
+      <div class="power">
+        <b id="pw-state">asleep</b> · <span id="pw-draw">~9 µA</span> ·
+        <span id="runtime">weeks, idle</span><br>
+        <span id="pw-note">the image holds with no power at all — that is the only free part</span>
+        <div class="bar" aria-hidden="true"><i id="pw-bar"></i></div>
+      </div>
+
+      <div class="legend">
+        <b>the dashed box</b> is the dirty rectangle — the only region the panel
+        is asked to drive.<br>
+        <i>grey specks</i> are ghosting: pixels toggled repeatedly without a full
+        waveform to settle them.<br>
+        <b>every 10 partials</b> the panel must flash a full refresh to clear them.
+      </div>
+
+      <div class="log mono" id="log" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section class="notes">
+    <h2>What the research says</h2>
+    <p>
+      The 2.9" module is an SSD1680-class panel and the V2 spec explicitly lists
+      <em>support partial refresh</em>. So the limit isn't capability, it's
+      <strong>time</strong>: a full refresh takes ~2.4 s with a visible invert
+      cycle, a partial is ~0.3–0.6 s with no flash, and a "fast" waveform sits
+      in between at the cost of contrast. Firmware in the wild escalates
+      PARTIAL → FAST → FULL as ghosting accumulates, because a partial never
+      fully settles the pigment.
+    </p>
+
+    <h2>The three techniques this page uses</h2>
+    <table>
+      <tr><th>Technique</th><th>Why</th></tr>
+      <tr><td>Two 1-bit buffers (prev/next)</td><td>a delta needs the old frame; the panel controller compares both</td></tr>
+      <tr><td>Dirty-rectangle refresh</td><td>driving 40×30 px instead of 296×128 px is ~30× less work and less ghosting</td></tr>
+      <tr><td>Refresh escalation</td><td>ghosts accumulate monotonically; a forced full refresh is the only cure</td></tr>
+    </table>
+
+    <h2>The number that kills the idea</h2>
+    <p>
+      A partial refresh is ~0.4 s at ~15 mA. At 3 fps that's a duty cycle above
+      100 % — the panel is <em>always</em> refreshing, averaging ~15 mA. On a
+      500 mAh cell that's roughly <strong>33 hours</strong>, not the weeks the
+      bistable display promises. Animation spends the entire power advantage of
+      e-paper to buy 3 frames per second.
+    </p>
+
+    <h2>So when is it worth it?</h2>
+    <p>
+      When the animation is <strong>infrequent</strong>: a fish that moves every
+      few seconds, a weather scene that redraws once a minute, a butterfly that
+      flutters only when someone taps. Slow motion plus dirty rectangles keeps
+      the average draw in the microamps. Continuous 20 fps animation is possible
+      — people have run Bad Apple at 20 fps on raw-drive panels — but you're no
+      longer building a low-power device, you're building a very slow screen.
+    </p>
+  </section>
+</main>
+
+<footer class="foot mono">
+  <span>E-Paper Buddy · animation</span>
+  <span>dirty-rect · partial → full</span>
+</footer>
+
+<script src="assets/scenes.js?v=2"></script>
+</body>
+</html>
