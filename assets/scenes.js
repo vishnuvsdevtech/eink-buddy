@@ -190,6 +190,95 @@ class Butterflies {
   }
 }
 
+
+/* ---------------- ASCII tank ----------------
+ * Characters, not sprites. A 5x7 glyph in an 8x8 cell gives 37x16 cells on
+ * this panel, which is how the reel does it: the fish is five glyphs, a bubble
+ * is one, and the seaweed is a column of brackets that alternate as they sway.
+ * It reads as a tank because the eye fills in the water.
+ */
+const GLYPHS = {
+  ' ': ['00000','00000','00000','00000','00000','00000','00000'],
+  'o': ['00000','00000','01110','10001','10001','01110','00000'],
+  'O': ['01110','10001','10001','10001','10001','10001','01110'],
+  '(': ['00110','01000','10000','10000','10000','01000','00110'],
+  ')': ['01100','00010','00001','00001','00001','00010','01100'],
+  '-': ['00000','00000','00000','11111','00000','00000','00000'],
+  '_': ['00000','00000','00000','00000','00000','00000','11111'],
+  '>': ['10000','11000','11100','11110','11100','11000','10000'],
+  '<': ['00001','00011','00111','01111','00111','00011','00001'],
+  '~': ['00000','00000','01001','10110','01001','00000','00000'],
+  '\\u00b0': ['00000','01100','10010','10010','01100','00000','00000'],
+};
+
+const CELLW = 5, CELLH = 8;           // advance 5 = no gap, glyphs touch as in the reel
+
+function drawText(fb, str, col, row) {
+  for (let ci = 0; ci < str.length; ci++) {
+    const g = GLYPHS[str[ci]];
+    if (!g) continue;
+    const ox = col * CELLW + ci * CELLW;
+    const oy = row * CELLH;
+    for (let y = 0; y < 7; y++) {
+      for (let x = 0; x < 5; x++) {
+        if (g[y][x] === '1') fb.px(ox + x, oy + y + 1, 1);
+      }
+    }
+  }
+}
+
+class AsciiTank {
+  constructor() { this.name = 'ascii tank'; this.reset(); }
+  reset() {
+    this.fish = { col: 14, row: 6, dir: 1, bob: 0 };
+    this.grass = [3, 53];
+    this.bubbles = Array.from({ length: 7 }, (_, i) => ({
+      col: 4 + Math.random() * 28,
+      row: 4 + Math.random() * 10,
+      speed: i % 3 === 0 ? 2 : 3,       // steps per cell
+      tick: i,
+      big: i % 4 === 0,
+    }));
+    this.t = 0;
+  }
+  step() {
+    this.t++;
+    // fish: one cell sideways every 3 frames, bobbing on a slow sine
+    if (this.t % 3 === 0) {
+      this.fish.col += this.fish.dir;
+      if (this.fish.col > 48) { this.fish.col = 48; this.fish.dir = -1; }
+      if (this.fish.col < 1) { this.fish.col = 1; this.fish.dir = 1; }
+    }
+    this.fish.bob = Math.sin(this.t / 5) * 1.2;
+    // bubbles rise one cell every few frames, then restart at the floor
+    for (const b of this.bubbles) {
+      b.tick++;
+      if (b.tick % b.speed === 0) {
+        b.row -= 1;
+        if (b.row < 1) { b.row = 13 + Math.random() * 2; b.col = 3 + Math.random() * 30; }
+      }
+    }
+  }
+  draw(fb) {
+    // seaweed: a column of brackets that alternate, which is what reads as sway
+    for (const gx of this.grass) {
+      for (let r = 6; r <= 14; r++) {
+        const flip = (Math.floor(this.t / 3) + r + gx) % 2 === 0;
+        drawText(fb, flip ? '(' : ')', gx, r);
+      }
+    }
+    // bubbles
+    for (const b of this.bubbles) {
+      drawText(fb, b.big ? 'O' : 'o', Math.round(b.col), Math.round(b.row));
+    }
+    // one fish, five glyphs wide, facing its direction of travel
+    const f = this.fish;
+    const row = Math.round(f.row + f.bob);
+    if (f.dir > 0) drawText(fb, '-(\u00b0)>', f.col, row);
+    else drawText(fb, '<(\u00b0)-', f.col, row);
+  }
+}
+
 /* ---------------- panel ---------------- */
 const canvas = document.getElementById('epd');
 const ctx = canvas.getContext('2d');
@@ -205,7 +294,7 @@ const ghost = new Uint8Array(W * H); // toggle count per pixel since last full
 const el = (id) => document.getElementById(id);
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-const scenes = [new Aquarium(), new Butterflies()];
+const scenes = [new AsciiTank(), new Aquarium(), new Butterflies()];
 let sceneIdx = 0;
 let playing = false;
 let frame = 0;
